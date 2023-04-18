@@ -16,6 +16,8 @@ type SettingInfo struct {
 	Language  string `json:"language"`
 
 	ServerPort             string `json:"serverPort"`
+	SSL                    string `json:"ssl"`
+	SSLType                string `json:"sslType"`
 	SecurityEntrance       string `json:"securityEntrance"`
 	ExpirationDays         string `json:"expirationDays"`
 	ExpirationTime         string `json:"expirationTime"`
@@ -37,6 +39,14 @@ type SettingInfo struct {
 type SettingUpdate struct {
 	Key   string `json:"key" validate:"required"`
 	Value string `json:"value"`
+}
+
+type SSLUpdate struct {
+	SSLType string `json:"sslType"`
+	SSL     string `json:"ssl" validate:"required,oneof=enable disable"`
+	Cert    string `json:"cret"`
+	Key     string `json:"key"`
+	SSLID   uint   `json:"sslID"`
 }
 
 type PasswordUpdate struct {

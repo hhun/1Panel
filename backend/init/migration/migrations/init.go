@@ -281,3 +281,13 @@ var UpdateTableWebsite = &gormigrate.Migration{
 		return tx.AutoMigrate(&model.Website{})
 	},
 }
+
+var AddSSLSetting = &gormigrate.Migration{
+	ID: "20230418-add-ssl-setting",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.Create(&model.Setting{Key: "SSLType", Value: "self"}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&model.Setting{Key: "SSL", Value: "enable"}).Error
+	},
+}
