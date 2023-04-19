@@ -1,10 +1,13 @@
 package service
 
 import (
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/1Panel-dev/1Panel/backend/app/dto"
@@ -25,7 +28,8 @@ type ISettingService interface {
 	Update(key, value string) error
 	UpdatePassword(c *gin.Context, old, new string) error
 	UpdatePort(port uint) error
-	UpdateSSL(req dto.SSLUpdate) error
+	UpdateSSL(c *gin.Context, req dto.SSLUpdate) error
+	LoadFromCert() (*dto.SSLInfo, error)
 	HandlePasswordExpired(c *gin.Context, old, new string) error
 }
 
@@ -94,7 +98,7 @@ func (u *SettingService) UpdatePort(port uint) error {
 	return nil
 }
 
-func (u *SettingService) UpdateSSL(req dto.SSLUpdate) error {
+func (u *SettingService) UpdateSSL(c *gin.Context, req dto.SSLUpdate) error {
 	if req.SSL == "disable" {
 		if err := settingRepo.Update("SSL", "disable"); err != nil {
 			return err
@@ -115,7 +119,8 @@ func (u *SettingService) UpdateSSL(req dto.SSLUpdate) error {
 
 	switch req.SSLType {
 	case "self":
-		if err := ssl.GenerateSSL(); err != nil {
+		domains := loadDomain(c)
+		if err := ssl.GenerateSSL(domains); err != nil {
 			return err
 		}
 	case "import":
@@ -149,6 +154,28 @@ func (u *SettingService) UpdateSSL(req dto.SSLUpdate) error {
 		}
 	}()
 	return nil
+}
+
+func (u *SettingService) LoadFromCert() (*dto.SSLInfo, error) {
+	certFile := global.CONF.System.BaseDir + "/1panel/secret/user.crt"
+	certData, err := os.ReadFile(certFile)
+	if err != nil {
+		return nil, err
+	}
+	certBlock, _ := pem.Decode(certData)
+	if certBlock == nil {
+		return nil, err
+	}
+	certObj, err := x509.ParseCertificate(certBlock.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	return &dto.SSLInfo{
+		Domain:   strings.Join(certObj.DNSNames, ","),
+		Subject:  certObj.Subject.CommonName,
+		Timeout:  certObj.NotAfter.Format("2006-01-02 15:04:05"),
+		RootPath: global.CONF.System.BaseDir + "/1panel/secret/root.crt",
+	}, nil
 }
 
 func (u *SettingService) HandlePasswordExpired(c *gin.Context, old, new string) error {
@@ -188,4 +215,21 @@ func (u *SettingService) UpdatePassword(c *gin.Context, old, new string) error {
 	}
 	_ = global.SESSION.Clean()
 	return nil
+}
+
+func loadDomain(c *gin.Context) []string {
+	var domain []string
+	ip := c.Request.RemoteAddr
+	if idx := strings.Index(ip, ":"); idx != -1 {
+		ip = ip[:idx]
+		if ip != "localhost" && ip != "127.0.0.1" && ip != "::1" {
+			domain = append(domain, ip)
+		}
+	}
+	if host := c.Request.Header.Get("X-Forwarded-Host"); len(host) > 0 {
+		domain = append(domain, host)
+	} else if host := c.Request.Header.Get("Host"); len(host) > 0 {
+		domain = append(domain, host)
+	}
+	return domain
 }

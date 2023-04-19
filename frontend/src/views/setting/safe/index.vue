@@ -20,44 +20,6 @@
                                 </el-input>
                             </el-form-item>
 
-                            <el-form-item label="https" required prop="ssl">
-                                <el-switch
-                                    @change="handleSSL"
-                                    v-model="form.ssl"
-                                    active-value="enable"
-                                    inactive-value="disable"
-                                />
-                                <span class="input-help">为面板设置https协议访问，提升面板访问安全性</span>
-                                <el-card v-if="isSSLShow">
-                                    <el-radio-group v-model="form.sslType" v-if="isSSLShow">
-                                        <el-radio label="self">自签名</el-radio>
-                                        <el-radio label="import">导入证书</el-radio>
-                                    </el-radio-group>
-                                    <span class="input-help" v-if="form.sslType === 'self'">
-                                        自签证书，不被浏览器信任，显示不安全是正常现象
-                                    </span>
-
-                                    <div v-if="form.sslType === 'import'">
-                                        <span class="input-help">密钥(KEY)</span>
-                                        <el-input
-                                            v-model="ssl.cert"
-                                            :autosize="{ minRows: 2, maxRows: 6 }"
-                                            type="textarea"
-                                        />
-                                        <span class="input-help">证书(PEM格式)</span>
-                                        <el-input
-                                            style="margin-bottom: 10px"
-                                            v-model="ssl.key"
-                                            :autosize="{ minRows: 2, maxRows: 6 }"
-                                            type="textarea"
-                                        />
-                                    </div>
-                                    <el-button type="primary" @click="onSaveSSL">
-                                        {{ $t('commons.button.saveAndEnable') }}
-                                    </el-button>
-                                </el-card>
-                            </el-form-item>
-
                             <el-form-item
                                 :label="$t('setting.expirationTime')"
                                 prop="expirationTime"
@@ -142,6 +104,55 @@
                                     </ul>
                                 </el-card>
                             </el-form-item>
+
+                            <el-form-item label="https" required prop="ssl">
+                                <el-switch
+                                    @change="handleSSL"
+                                    v-model="form.ssl"
+                                    active-value="enable"
+                                    inactive-value="disable"
+                                />
+                                <span class="input-help">为面板设置https协议访问，提升面板访问安全性</span>
+                                <el-card v-if="isSSLShow">
+                                    <el-radio-group v-model="form.sslType" v-if="isSSLShow">
+                                        <el-radio label="self">自签名</el-radio>
+                                        <el-radio label="import">导入证书</el-radio>
+                                    </el-radio-group>
+                                    <span class="input-help" v-if="form.sslType === 'self'">
+                                        自签证书，不被浏览器信任，显示不安全是正常现象
+                                    </span>
+                                    <div v-if="form.sslType === 'self' && sslInfo">
+                                        <div>
+                                            <el-tag>域名：{{ sslInfo.domain }}</el-tag>
+                                        </div>
+                                        <div>
+                                            <el-tag>证书：{{ sslInfo.subject }}</el-tag>
+                                        </div>
+                                        <div>
+                                            <el-tag>到期时间：{{ sslInfo.timeout }}</el-tag>
+                                        </div>
+                                        <el-button type="primary" link icon="Download">根证书下载</el-button>
+                                    </div>
+
+                                    <div v-if="form.sslType === 'import'">
+                                        <span class="input-help">密钥(KEY)</span>
+                                        <el-input
+                                            v-model="ssl.cert"
+                                            :autosize="{ minRows: 2, maxRows: 6 }"
+                                            type="textarea"
+                                        />
+                                        <span class="input-help">证书(PEM格式)</span>
+                                        <el-input
+                                            v-model="ssl.key"
+                                            :autosize="{ minRows: 2, maxRows: 6 }"
+                                            type="textarea"
+                                        />
+                                    </div>
+                                    <el-button style="margin-top: 10px" type="primary" @click="onSaveSSL">
+                                        {{ $t('commons.button.saveAndEnable') }}
+                                    </el-button>
+                                </el-card>
+                            </el-form-item>
                         </el-col>
                     </el-row>
                 </el-form>
@@ -183,17 +194,23 @@ import {
     updatePort,
     getSystemAvailable,
     updateSSL,
+    loadSSLInfo,
 } from '@/api/modules/setting';
 import i18n from '@/lang';
 import { Rules, checkNumberRange } from '@/global/form-rules';
 import { dateFormatSimple } from '@/utils/util';
 import { MsgError, MsgSuccess } from '@/utils/message';
+import { GlobalStore } from '@/store';
+
+const globalStore = GlobalStore();
 
 const loading = ref(false);
 const ssl = reactive({
     cert: '',
     key: '',
 });
+const sslInfo = ref();
+
 const form = reactive({
     serverPort: 9999,
     ssl: 'disable',
@@ -218,6 +235,10 @@ const search = async () => {
     const res = await getSettingInfo();
     form.serverPort = Number(res.data.serverPort);
     form.ssl = res.data.ssl;
+    if (form.ssl === 'enable' && form.sslType === 'self') {
+        const info = await loadSSLInfo();
+        sslInfo.value = info.data;
+    }
     isSSLShow.value = form.ssl === 'enable';
     form.sslType = res.data.sslType;
     form.securityEntrance = res.data.securityEntrance;
@@ -320,17 +341,26 @@ const handleSSL = async () => {
     if (form.ssl === 'enable') {
         isSSLShow.value = true;
     } else {
-        isSSLShow.value = false;
-        loading.value = true;
-        await updateSetting({ key: 'ssl', value: 'disable' })
-            .then(() => {
-                loading.value = false;
-                search();
-                MsgSuccess(i18n.global.t('commons.msg.operationSuccess'));
-            })
-            .catch(() => {
-                loading.value = false;
-            });
+        ElMessageBox.confirm(i18n.global.t('setting.sslDisableHelper'), i18n.global.t('setting.sslDisable'), {
+            confirmButtonText: i18n.global.t('commons.button.confirm'),
+            cancelButtonText: i18n.global.t('commons.button.cancel'),
+            type: 'info',
+        }).then(async () => {
+            isSSLShow.value = false;
+            loading.value = true;
+            await updateSSL({ ssl: 'disable', sslType: '', key: '', cert: '', sslID: 0 })
+                .then(() => {
+                    loading.value = false;
+                    MsgSuccess(i18n.global.t('commons.msg.operationSuccess'));
+                    let href = window.location.href;
+                    globalStore.isSSL = false;
+                    let address = href.split('://')[1];
+                    window.open(`http://${address}/`, '_self');
+                })
+                .catch(() => {
+                    loading.value = false;
+                });
+        });
     }
 };
 const onSaveSSL = async () => {
@@ -347,6 +377,7 @@ const onSaveSSL = async () => {
             loading.value = false;
             MsgSuccess(i18n.global.t('commons.msg.operationSuccess'));
             let href = window.location.href;
+            globalStore.isSSL = true;
             let address = href.split('://')[1];
             window.open(`https://${address}/`, '_self');
         })
